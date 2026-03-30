@@ -16,6 +16,7 @@ import org.jsoup.nodes.Document
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 class ArchiveCreator(private val context: Context) {
 
@@ -93,11 +94,14 @@ class ArchiveCreator(private val context: Context) {
             }
             
             onProgress("Rewriting HTML for offline...")
+            val mediaItemsList: List<MediaItem> = downloadedFiles.map {
+                MediaItem(url = it.fileName, type = it.type, originalUrl = it.url)
+            }
             val rewrittenHtml = HtmlRewriter.rewriteHtmlForOffline(
                 html,
                 url,
-                downloadedFiles,
-                mediaDir
+                mediaItemsList,
+                mediaFolder
             )
             
             onProgress("Saving index.html...")

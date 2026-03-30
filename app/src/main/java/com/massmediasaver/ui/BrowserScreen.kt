@@ -129,7 +129,7 @@ fun BrowserScreen(
                         focusManager.clearFocus()
                     }
                 ) {
-                    Icon(Icons.Default.Go, contentDescription = "Go")
+                    Icon(Icons.Default.ArrowForward, contentDescription = "Go")
                 }
             }
 
@@ -178,7 +178,7 @@ fun BrowserScreen(
             // Progress indicator
             if (downloadProgress != null) {
                 LinearProgressIndicator(
-                    progress = { (downloadProgress!!.current.toFloat() / downloadProgress!!.total.toFloat()) },
+                    progress = downloadProgress!!.current.toFloat() / downloadProgress!!.total.toFloat(),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(8.dp)

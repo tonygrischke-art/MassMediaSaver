@@ -95,7 +95,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             _downloadProgress.value = DownloadProgress(0, items.size, "", false)
             
             try {
-                mediaDownloader.downloadMedia(items).collect { progress ->
+                mediaDownloader.downloadMedia(items) { progress ->
                     _downloadProgress.value = progress
                     if (progress.isComplete) {
                         _downloadComplete.value = DownloadItem(
@@ -142,7 +142,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             _archiveProgress.value = "Starting archive creation..."
             
             try {
-                archiveCreator.createFullArchive(url, html).collect { archiveItem ->
+                archiveCreator.createFullArchive(url, html) { progress ->
+                    _archiveProgress.value = progress
+                }.collect { archiveItem ->
                     if (archiveItem != null) {
                         _archiveProgress.value = "Archive saved: ${archiveItem.name}"
                         _archiveComplete.value = true

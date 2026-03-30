@@ -1,8 +1,10 @@
 package com.massmediasaver.util
 
 import com.massmediasaver.data.MediaItem
+import com.massmediasaver.data.MediaType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
