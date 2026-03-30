@@ -6,6 +6,8 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,8 +30,7 @@ import com.massmediasaver.viewmodel.BrowserViewModel
 @Composable
 fun BrowserScreen(
     viewModel: BrowserViewModel = viewModel(),
-    onShowDownloads: () -> Unit = {},
-    onShowArchives: () -> Unit = {}
+    modifier: Modifier = Modifier
 ) {
     val currentUrl by viewModel.currentUrl.collectAsState()
     val pageTitle by viewModel.pageTitle.collectAsState()
@@ -41,10 +42,67 @@ fun BrowserScreen(
     val error by viewModel.error.collectAsState()
     val mediaItems by viewModel.mediaItems.collectAsState()
 
-    var urlInput by remember { mutableStateOf("") }
+    var urlInput by remember { mutableStateOf("https://www.example.com") }
+    var webView by remember { mutableStateOf<WebView?>(null) }
     val focusManager = LocalFocusManager.current
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val canGoBack = remember { mutableStateOf(false) }
+
+    val activity = LocalActivity.current
+
+    LaunchedEffect(webView) {
+        webView?.let { wv ->
+            wv.webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    canGoBack.value = view?.canGoBack() ?: false
+                    viewModel.updateLoading(false)
+                    url?.let { viewModel.updateUrl(it) }
+                    view?.title?.let { viewModel.updateTitle(it) }
+
+                    view?.evaluateJavascript(
+                        """
+                        (function() {
+                            return document.documentElement.outerHTML;
+                        })();
+                        """.trimIndent()
+                    ) { html ->
+                        if (!html.isNullOrEmpty()) {
+                            val cleanHtml = html
+                                .replace("\\u003C", "<")
+                                .replace("\\\\", "")
+                                .removeSurrounding("\"")
+                            viewModel.updateHtml(cleanHtml)
+                            viewModel.extractMediaFromPage(cleanHtml, url ?: "")
+                        }
+                    }
+                }
+
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: WebResourceRequest?
+                ): Boolean {
+                    return false
+                }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        val callback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView?.canGoBack() == true) {
+                    webView?.goBack()
+                } else {
+                    isEnabled = false
+                    activity?.onBackPressedDispatcher?.onBackPressed()
+                }
+            }
+        }
+        activity?.onBackPressedDispatcher?.addCallback(callback)
+        onDispose { }
+    }
 
     LaunchedEffect(currentUrl) {
         if (currentUrl.isNotEmpty() && urlInput.isEmpty()) {
@@ -77,24 +135,52 @@ fun BrowserScreen(
         topBar = {
             TopAppBar(
                 title = { Text(pageTitle.ifEmpty { "Mass Media Saver" }) },
-                actions = {
-                    IconButton(onClick = onShowDownloads) {
-                        Icon(Icons.Default.Download, contentDescription = "Downloads")
+                navigationIcon = {
+                    IconButton(
+                        onClick = { webView?.goBack() },
+                        enabled = canGoBack.value
+                    ) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
-                    IconButton(onClick = onShowArchives) {
-                        Icon(Icons.Default.Archive, contentDescription = "Archives")
+                },
+                actions = {
+                    IconButton(
+                        onClick = { viewModel.downloadAllMedia() },
+                        enabled = mediaItems.isNotEmpty() && downloadProgress == null
+                    ) {
+                        if (downloadProgress != null) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.Download, contentDescription = "Download All Media")
+                        }
+                    }
+                    IconButton(
+                        onClick = { viewModel.savePageComplete() },
+                        enabled = archiveProgress == null
+                    ) {
+                        if (archiveProgress != null) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Default.Save, contentDescription = "Save Page Complete")
+                        }
                     }
                 }
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        modifier = modifier
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // URL Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -105,7 +191,8 @@ fun BrowserScreen(
                     value = urlInput,
                     onValueChange = { urlInput = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Enter URL") },
+                    label = { Text("Enter webpage URL") },
+                    placeholder = { Text("Paste or type a URL and tap Go") },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Uri,
                         imeAction = ImeAction.Go
@@ -114,6 +201,7 @@ fun BrowserScreen(
                         onGo = {
                             val url = if (urlInput.startsWith("http")) urlInput else "https://$urlInput"
                             viewModel.updateUrl(url)
+                            webView?.loadUrl(url)
                             focusManager.clearFocus()
                         }
                     ),
@@ -126,6 +214,7 @@ fun BrowserScreen(
                     onClick = {
                         val url = if (urlInput.startsWith("http")) urlInput else "https://$urlInput"
                         viewModel.updateUrl(url)
+                        webView?.loadUrl(url)
                         focusManager.clearFocus()
                     }
                 ) {
@@ -133,60 +222,17 @@ fun BrowserScreen(
                 }
             }
 
-            // Action Buttons
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = { viewModel.downloadAllMedia() },
-                    modifier = Modifier.weight(1f),
-                    enabled = mediaItems.isNotEmpty() && downloadProgress == null
-                ) {
-                    if (downloadProgress != null) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(Icons.Default.Download, contentDescription = null)
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Download All")
-                }
-
-                Button(
-                    onClick = { viewModel.savePageComplete() },
-                    modifier = Modifier.weight(1f),
-                    enabled = archiveProgress == null
-                ) {
-                    if (archiveProgress != null) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(Icons.Default.Save, contentDescription = null)
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Save Page")
-                }
-            }
-
-            // Progress indicator
             if (downloadProgress != null) {
                 LinearProgressIndicator(
                     progress = downloadProgress!!.current.toFloat() / downloadProgress!!.total.toFloat(),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(8.dp)
+                        .padding(horizontal = 8.dp)
                 )
                 Text(
                     text = "Downloading ${downloadProgress!!.current}/${downloadProgress!!.total}: ${downloadProgress!!.currentFile}",
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 8.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
 
@@ -194,25 +240,33 @@ fun BrowserScreen(
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(8.dp)
+                        .padding(horizontal = 8.dp)
                 )
                 Text(
                     text = archiveProgress!!,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 8.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
 
-            // Media count
             if (mediaItems.isNotEmpty()) {
-                Text(
-                    text = "${mediaItems.size} media items found (${mediaItems.count { it.type == com.massmediasaver.data.MediaType.IMAGE }} images, ${mediaItems.count { it.type == com.massmediasaver.data.MediaType.VIDEO }} videos)",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(8.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${mediaItems.size} media items (${mediaItems.count { it.type == com.massmediasaver.data.MediaType.IMAGE }} images, ${mediaItems.count { it.type == com.massmediasaver.data.MediaType.VIDEO }} videos)",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    TextButton(onClick = { viewModel.clearMediaItems() }) {
+                        Text("Clear")
+                    }
+                }
             }
 
-            // WebView
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
@@ -226,39 +280,7 @@ fun BrowserScreen(
                         settings.loadWithOverviewMode = true
                         settings.useWideViewPort = true
                         settings.builtInZoomControls = true
-
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                viewModel.updateLoading(false)
-                                url?.let { viewModel.updateUrl(it) }
-                                view?.title?.let { viewModel.updateTitle(it) }
-
-                                view?.evaluateJavascript(
-                                    """
-                                    (function() {
-                                        return document.documentElement.outerHTML;
-                                    })();
-                                    """.trimIndent()
-                                ) { html ->
-                                    if (!html.isNullOrEmpty()) {
-                                        val cleanHtml = html
-                                            .replace("\\u003C", "<")
-                                            .replace("\\\\", "")
-                                            .removeSurrounding("\"")
-                                        viewModel.updateHtml(cleanHtml)
-                                        viewModel.extractMediaFromPage(cleanHtml, url ?: "")
-                                    }
-                                }
-                            }
-
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): Boolean {
-                                return false
-                            }
-                        }
+                        settings.displayZoomControls = false
 
                         webChromeClient = object : WebChromeClient() {
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -266,19 +288,17 @@ fun BrowserScreen(
                                 viewModel.updateLoading(newProgress < 100)
                             }
                         }
+
+                        loadUrl("https://www.example.com")
+                        webView = this
                     }
                 },
-                update = { webView ->
-                    if (currentUrl.isNotEmpty() && webView.url != currentUrl) {
-                        webView.loadUrl(currentUrl)
-                    }
-                },
+                update = { },
                 modifier = Modifier
                     .fillMaxSize()
                     .weight(1f)
             )
 
-            // Loading indicator
             if (isLoading) {
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth()

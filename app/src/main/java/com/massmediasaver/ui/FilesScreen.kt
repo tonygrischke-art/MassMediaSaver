@@ -27,7 +27,8 @@ import java.io.File
 @Composable
 fun FilesScreen(
     viewModel: DownloadsViewModel = viewModel(),
-    onNavigateBack: () -> Unit = {}
+    modifier: Modifier = Modifier,
+    onNavigateBack: (() -> Unit)? = null
 ) {
     val downloads by viewModel.downloads.collectAsState()
     val archives by viewModel.archives.collectAsState()
@@ -43,14 +44,10 @@ fun FilesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Files") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
-                }
+                title = { Text(if (selectedTab == 0) "Downloads" else "Archives") }
             )
-        }
+        },
+        modifier = modifier
     ) { paddingValues ->
         Column(
             modifier = Modifier

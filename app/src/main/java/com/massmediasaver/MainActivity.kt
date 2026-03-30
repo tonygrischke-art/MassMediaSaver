@@ -4,16 +4,19 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.massmediasaver.ui.BrowserScreen
@@ -23,17 +26,21 @@ import com.massmediasaver.ui.MassMediaSaverTheme
 import com.massmediasaver.viewmodel.BrowserViewModel
 import com.massmediasaver.viewmodel.DownloadsViewModel
 
+sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
+    object Browser : Screen("browser", "Browser", Icons.Default.Language)
+    object Downloads : Screen("downloads", "Downloads", Icons.Default.Download)
+    object Archives : Screen("archives", "Archives", Icons.Default.Archive)
+}
+
 class MainActivity : ComponentActivity() {
 
     private var hasAcceptedDisclaimer by mutableStateOf(false)
-    private var needsStoragePermission by mutableStateOf(false)
 
     private val storagePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.values.all { it }
         if (allGranted) {
-            needsStoragePermission = false
         } else {
             Toast.makeText(this, "Storage permission is required", Toast.LENGTH_LONG).show()
         }
@@ -50,9 +57,9 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    var currentScreen by remember { mutableStateOf("browser") }
                     val browserViewModel: BrowserViewModel = viewModel()
                     val downloadsViewModel: DownloadsViewModel = viewModel()
+                    var currentRoute by remember { mutableStateOf(Screen.Browser.route) }
 
                     if (!hasAcceptedDisclaimer) {
                         DisclaimerDialog(
@@ -61,20 +68,44 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     } else {
-                        when (currentScreen) {
-                            "browser" -> BrowserScreen(
-                                viewModel = browserViewModel,
-                                onShowDownloads = { currentScreen = "downloads" },
-                                onShowArchives = { currentScreen = "archives" }
-                            )
-                            "downloads" -> FilesScreen(
-                                viewModel = downloadsViewModel,
-                                onNavigateBack = { currentScreen = "browser" }
-                            )
-                            "archives" -> FilesScreen(
-                                viewModel = downloadsViewModel,
-                                onNavigateBack = { currentScreen = "browser" }
-                            )
+                        Scaffold(
+                            bottomBar = {
+                                NavigationBar {
+                                    listOf(
+                                        Screen.Browser,
+                                        Screen.Downloads,
+                                        Screen.Archives
+                                    ).forEach { screen ->
+                                        NavigationBarItem(
+                                            icon = { Icon(screen.icon, contentDescription = screen.title) },
+                                            label = { Text(screen.title) },
+                                            selected = currentRoute == screen.route,
+                                            onClick = { currentRoute = screen.route }
+                                        )
+                                    }
+                                }
+                            }
+                        ) { paddingValues ->
+                            when (currentRoute) {
+                                Screen.Browser.route -> BrowserScreen(
+                                    viewModel = browserViewModel,
+                                    modifier = Modifier.padding(paddingValues)
+                                )
+                                Screen.Downloads.route -> {
+                                    downloadsViewModel.setSelectedTab(0)
+                                    FilesScreen(
+                                        viewModel = downloadsViewModel,
+                                        modifier = Modifier.padding(paddingValues)
+                                    )
+                                }
+                                Screen.Archives.route -> {
+                                    downloadsViewModel.setSelectedTab(1)
+                                    FilesScreen(
+                                        viewModel = downloadsViewModel,
+                                        modifier = Modifier.padding(paddingValues)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
